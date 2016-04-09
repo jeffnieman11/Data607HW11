@@ -1,0 +1,223 @@
+---
+title: 'Homework 11'
+author: "Jeff Nieman"
+date: "April 9, 2016"
+output: html_document
+---
+#Document Classification 
+
+####1.  Began by initiating the needed packages
+
+```{r, warning = FALSE, message = FALSE}
+library(stringr)
+library(RCurl)
+library(tm)
+library(RTextTools)
+library(knitr)
+```
+
+####2.  Focusing first on ham examples I took the following steps:
+    * Downloaded the ham files from the corpus available on https://spamassassin.apache.org/publiccorpus/
+    * Used the "readLines" function from the tm package to get the lines for the first ham email
+    * Began building the corpus for analyis through the "str_c" function from the stringr package
+    
+```{r setup}
+opts_knit$set(root.dir = 'C:/Users/jenieman/Documents/CUNY/Data 607/HW11/easy_ham/')
+```
+
+    ```{r}
+hamlist <- list.files("C:/Users/jenieman/Documents/CUNY/Data 607/HW11/easy_ham")
+n <- length(hamlist)
+temp <- c(readLines(hamlist[1]))
+corpham <- str_c(temp, collapse = "")
+hams <- "ham"
+```
+
+####3.  Created a loop to finish the corpus for all of the downloaded ham emails and created a "ham" label.
+
+```{r}
+for (i in 2:n) {
+  
+  temp <- c(readLines(hamlist[i]))
+  temp <- str_c(temp, collapse = "")
+  corpham <- c(corpham, temp)
+  ham <- "ham"
+  hams <- c(hams, ham)
+} 
+```
+
+####4.  Finished the ham corpus by combining the "ham" label with the text corpus and giving the resulting matrix column names
+
+```{r}
+hams <- as.matrix(hams, ncol=1)
+corpham <- as.matrix(corpham, ncol=1)
+ham2 <- cbind(hams, corpham)
+colnames(ham2) <- c("Type", "Text")
+```
+
+Example of ham email from corpus
+
+```{r}
+ham2[4,2]
+```
+
+####5.  Repeated steps 2-4 for the spam corpus
+
+```{r}
+opts_knit$set(root.dir = 'C:/Users/jenieman/Documents/CUNY/Data 607/HW11/spam/')
+```
+
+```{r}
+spamlist <- list.files("C:/Users/jenieman/Documents/CUNY/Data 607/HW11/spam")
+m <- length(spamlist)
+temp <- c(readLines(spamlist[1]))
+corpspam <- str_c(temp, collapse = "")
+spams <- "spam"
+```
+
+```{r, warning = FALSE}
+for (i in 2:m) {
+  
+  temp <- c(readLines(spamlist[i]))
+  temp <- str_c(temp, collapse = "")
+  corpspam <- c(corpspam, temp)
+  spam <- "spam"
+  spams <- c(spams, spam)
+} 
+
+spams <- as.matrix(spams, ncol=1)
+corpspam <- as.matrix(corpspam, ncol=1)
+spam2 <- cbind(spams, corpspam)
+colnames(spam2) <- c("Type", "Text")
+```
+
+Example of spam email from the corpus
+
+```{r}
+spam2[4,2]
+```
+
+####6.  Created a term document matrix using the following steps:
+    * Combined the corpus of ham emails with the corpus of spam emails
+    * Created a sample of 3000 out of the 3052 available documents to shuffle the spam and ham examples
+    * Used the "create_matrix" function in the RTextTools package to build the matrix
+    * To improve the comparison I removed puctuation, stop words, numbers and spare terms with a factor of 0.9
+    
+```{r}
+hamspam <- as.matrix(rbind(spam2, ham2))
+hamspam2 <- hamspam[sample(1:3052, size = 3000, replace = FALSE),]
+#Test randomness
+hamspam2[1:20,1]
+hsmat <- create_matrix(hamspam2, language = "english", removePunctuation = TRUE, removeStopwords = TRUE, removeNumbers = TRUE, removeSparseTerms = 0.9)
+hsmat
+```
+
+####7. Created a container using the "create_container" function from the RTextTools package splitting the sample of 3000 into 2/3 training data and 1/3 testing data.   
+
+```{r}
+type <- unlist(hamspam2[,1])
+container <- create_container(hsmat, as.numeric(factor(type)), trainSize = 1:2000, testSize = 2001:3000, virgin = FALSE)
+```
+
+####8.  Created a training model using the "train_model" from the RTextTools package using 8 different approaches.  The document from https://journal.r-project.org/archive/2013-1/collingwood-jurka-boydstun-etal.pdf was very helpful.
+
+```{r}
+SVM <- train_model(container, "SVM")
+GLMNET <- train_model(container,"GLMNET")
+MAXENT <- train_model(container,"MAXENT")
+SLDA <- train_model(container,"SLDA")
+BOOSTING <- train_model(container,"BOOSTING")
+BAGGING <- train_model(container,"BAGGING")
+RF <- train_model(container,"RF")
+TREE <- train_model(container,"TREE")
+```
+
+####9.  Classified the data for each of the 8 models using the "classify_model" function from RTextTools
+
+```{r}
+SVM_CLASSIFY <- classify_model(container, SVM)
+GLMNET_CLASSIFY <- classify_model(container, GLMNET)
+MAXENT_CLASSIFY <- classify_model(container, MAXENT)
+SLDA_CLASSIFY <- classify_model(container, SLDA)
+BOOSTING_CLASSIFY <- classify_model(container, BOOSTING)
+BAGGING_CLASSIFY <- classify_model(container, BAGGING)
+RF_CLASSIFY <- classify_model(container, RF)
+TREE_CLASSIFY <- classify_model(container, TREE)
+```
+
+####10. Ran and summarized the analytics using the "create_analytics" from RTextTools
+
+```{r}
+analytics <- create_analytics(container, cbind(SVM_CLASSIFY, GLMNET_CLASSIFY, MAXENT_CLASSIFY, SLDA_CLASSIFY, BOOSTING_CLASSIFY, BAGGING_CLASSIFY, RF_CLASSIFY, TREE_CLASSIFY))
+summary(analytics)
+```
+
+####11.  Created the data.frame summaries
+
+```{r}
+topic_summary <- analytics@label_summary
+alg_summary <- analytics@algorithm_summary
+ens_summary <-analytics@ensemble_summary
+doc_summary <- analytics@document_summary
+
+head(topic_summary)
+head(alg_summary)
+ens_summary
+head(doc_summary)
+```
+
+####12.  Created confusion matrices for the consensus along with a number of the models (special thanks to the example Dr. Andy Catlin provided on this)
+
+```{r}
+consensusCM <- table(true = analytics@document_summary$MANUAL_CODE, predict = analytics@document_summary$CONSENSUS_CODE)
+probCM <- table(true = analytics@document_summary$MANUAL_CODE, predict = analytics@document_summary$PROBABILITY_CODE)
+svmCM <- table(true = analytics@document_summary$MANUAL_CODE, predict = analytics@document_summary$SVM_LABEL)
+glmnetCM <- table(true = analytics@document_summary$MANUAL_CODE, predict = analytics@document_summary$GLMNET_LABEL)
+sldaCM <- table(true = analytics@document_summary$MANUAL_CODE, predict = analytics@document_summary$SLDA_LABEL)
+baggingCM <- table(true = analytics@document_summary$MANUAL_CODE, predict = analytics@document_summary$BAGGING_LABEL)
+treeCM <- table(true = analytics@document_summary$MANUAL_CODE, predict = analytics@document_summary$TREE_LABEL)
+
+consensusCM 
+probCM 
+svmCM
+glmnetCM 
+sldaCM 
+baggingCM
+treeCM 
+```
+
+####13.  Finally in conclusion created some performance metrics for models SLDA and Bagging (shown as examples below)
+
+```{r}
+#Performance Metrics for SLDA Model
+TP <- sldaCM[2, 2] 
+TN <- sldaCM[1, 1]
+FP <- sldaCM[2, 1]
+FN <- sldaCM[1, 2]
+Accuracy <- ((TP + TN)/(TP + FP + TN + FN))
+ErrorRate <- ((FP + FN)/(TP + FP + TN + FN))
+Precision <- (TP/(TP + FP))
+Recall <- (TP/(TP + FN))
+Sensitivity <- (TP/(TP + FN))
+Specificity <- (TN/(TN + FP))
+Output<- as.matrix(c(Accuracy, ErrorRate, Precision, Recall, Sensitivity, Specificity))
+rownames(Output) <- c("Accuracy", "Error Rate", "Precision", "Recall", "Sensitivity", "Specificity")
+Output
+
+#Performance Metrics for Bagging Model
+TP <- baggingCM[2, 2] 
+TN <- baggingCM[1, 1]
+FP <- baggingCM[2, 1]
+FN <- baggingCM[1, 2]
+Accuracy <- ((TP + TN)/(TP + FP + TN + FN))
+ErrorRate <- ((FP + FN)/(TP + FP + TN + FN))
+Precision <- (TP/(TP + FP))
+Recall <- (TP/(TP + FN))
+Sensitivity <- (TP/(TP + FN))
+Specificity <- (TN/(TN + FP))
+Output<- as.matrix(c(Accuracy, ErrorRate, Precision, Recall, Sensitivity, Specificity))
+rownames(Output) <- c("Accuracy", "Error Rate", "Precision", "Recall", "Sensitivity", "Specificity")
+Output
+```
+###Conclusions
+All of the models tested worked well, but some models such as bagging, tree and GLMNet worked 100% of the time.  SLDA seemed to be among the lower performing models with 15 False Positives and False Negatives out of 1000 tested.
